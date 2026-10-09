@@ -172,15 +172,25 @@ class Solver:
 
     def isFrozenBlock(self, pos, crates):
         row, col = pos
-        for i in (-1, 0):
-            for j in (-1, 0):
-                block = (row + i, col + j), (row + i, col + j + 1), (row + i + 1, col + j), (row + i + 1, col + j + 1)
+        for d_row in (-1, 1):
+            for d_col in (-1, 1):
+                vert = (row + d_row, col)
+                hori = (row, col + d_col)
+                diag = (row + d_row, col + d_col)
 
-                if not all(c in self.walls or c in crates for c in block):
+                if vert not in crates and vert not in self.walls:
                     continue
-                if any(c in crates and c not in self.goals for c in block):
-                    return True
+                if hori not in crates and hori not in self.walls:
+                    continue
+                if diag not in crates and diag not in self.walls:
+                    continue
 
+                if pos not in self.goals:
+                    return True
+                for c in (vert, hori, diag):
+                    if c in crates and c not in self.goals:
+                        return True
+                
         return False
 
     def isSafePush(self, dest, newCrates):
