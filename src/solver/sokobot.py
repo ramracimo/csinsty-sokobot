@@ -317,3 +317,5 @@ class SokoBot:
         startState = (player, frozenset(crates))
 
         return solver.aStar(startState)
+
+    #snuppo likes me
