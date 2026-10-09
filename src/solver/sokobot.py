@@ -172,26 +172,27 @@ class Solver:
 
     def isFrozenBlock(self, pos, crates):
         row, col = pos
-        for d_row in (-1, 1):
+        for d_row in (-1, 1):                               #split a 3x3 grid with pos in the middle to 4 2x2 quadrants
             for d_col in (-1, 1):
-                vert = (row + d_row, col)
-                hori = (row, col + d_col)
-                diag = (row + d_row, col + d_col)
+                vert = (row + d_row, col)                   #to check above/below
+                hori = (row, col + d_col)                   #to check left/right
+                diag = (row + d_row, col + d_col)           #to check diaonally
 
-                if vert not in crates and vert not in self.walls:
+                #as long as any of the vert, hori, or diag is not blocked, we can skip the quadrant
+                if vert not in crates and vert not in self.walls:       
                     continue
                 if hori not in crates and hori not in self.walls:
                     continue
                 if diag not in crates and diag not in self.walls:
                     continue
 
-                if pos not in self.goals:
+                if pos not in self.goals:                       #if everything is blocked and pos is not in a goal, instantly means a deadlock
                     return True
-                for c in (vert, hori, diag):
+                for c in (vert, hori, diag):                    #if pos is in goal, check if among the other blocks that are crates if they are in a goal
                     if c in crates and c not in self.goals:
                         return True
                 
-        return False
+        return False                                        #else its not in a deadlock
 
     def isSafePush(self, dest, newCrates):
         if dest in self.dead:
