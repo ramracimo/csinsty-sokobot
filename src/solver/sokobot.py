@@ -234,27 +234,32 @@ class Solver:
 
     def isFrozenBlock(self, pos, crates):
         row, col = pos
-        for d_row in (-1, 1):                               #split a 3x3 grid with pos in the middle to 4 2x2 quadrants
-            for d_col in (-1, 1):
-                vert = (row + d_row, col)                   #to check above/below
-                hori = (row, col + d_col)                   #to check left/right
-                diag = (row + d_row, col + d_col)           #to check diagonally
+        walls = self.walls
+        goals = self.goals
 
-                #as long as any of the vert, hori, or diag is not blocked, we can skip the quadrant
-                if vert not in crates and vert not in self.walls:       
+        for d_row in (-1, 1):
+            for d_col in (-1, 1):   
+                vert = (row + d_row, col)                               #to check above/below
+                hori = (row, col + d_col)                               #to check left/right
+                diag = (row + d_row, col + d_col)                       #to check diagonally
+
+                if vert not in crates and vert not in walls:
                     continue
-                if hori not in crates and hori not in self.walls:
+                if hori not in crates and hori not in walls:
                     continue
-                if diag not in crates and diag not in self.walls:
+                if diag not in crates and diag not in walls:
                     continue
 
-                if pos not in self.goals:                       #if everything is blocked and pos is not in a goal, instantly means a deadlock
+                if pos not in goals:                                    #if everything is blocked and pos is not in a goal, instantly means a deadlock
                     return True
-                for c in (vert, hori, diag):                    #if pos is in goal, check if among the other blocks that are crates if they are in a goal
-                    if c in crates and c not in self.goals:
-                        return True
                 
-        return False                                        #else its not in a deadlock
+                #changed the for loop check into if statement
+                if (vert in crates and vert not in goals) or \
+                   (hori in crates and hori not in goals) or \
+                   (diag in crates and diag not in goals):
+                    return True
+                
+        return False                                                    #else its not in a deadlock
 
     def isSafePush(self, dest, newCrates):
         if dest in self.dead:
@@ -306,17 +311,23 @@ class Solver:
 
     #added a bfs from player position to get all possible position player can reach without obstruction
     def movableRegion(self, player, crates):
-        dist = {player: 0}                  #dict of a cell tuple corresponding to the distance
-        queue = deque([player])             #bfs queue 
+        dist = {player: 0}                                      #dict of a cell tuple corresponding to the distance
+        queue = deque([player])                                 #bfs queue 
+        walls = self.walls                                      #walls
 
         while queue:
             cell = queue.popleft()
-            for _, d_row, d_col in MOVES:                       #check all directions from the cell
-                newCell = (cell[0] + d_row, cell[1] + d_col)
 
-                if not self.isValidCell(newCell):               #make sure its a valid cell
-                    continue
+            #iterates the moves instead for speed
+            #check all directions from the cell
+            for d_row, d_col in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                newCell = (cell[0] + d_row, cell[1] + d_col)
                 if newCell in crates or newCell in dist:        #make sure its not blocked by crates or already explored
+                    continue
+                #make sure its a valid cell
+                if not (0 <= newCell[0] < self.height and 0 <= newCell[1] < self.width):
+                    continue
+                if newCell in walls:                            #make sure its not blocked by walls
                     continue
 
                 dist[newCell] = dist[cell] + 1                  #distance of newCell is always +1 from its starting cell
