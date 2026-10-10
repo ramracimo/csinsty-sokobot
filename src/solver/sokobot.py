@@ -17,6 +17,8 @@ class Solver:
         self.goals = goals
         self.dead = set()
         self.minDist = {}
+        self.goalDist = []          #distance table per goal
+        self.hCache = {}            #heuristic cache, per state (to make sure same states do not get their h recalculated)
         self.buildDistanceTable()
         self.findDeadSquares()
 
@@ -30,7 +32,7 @@ class Solver:
                 standing = (crate[0] - d_row, crate[1] - d_col)     #where the player has to be standing to make the push
                 pushed = (crate[0] + d_row, crate[1] + d_col)       #where the crate will be pushed to
                 
-                if standing not in dist:                            #make sure player can reach the postion
+                if standing not in dist:                            #make sure player can reach the position
                     continue
                 if not self.isValidCell(pushed):                    #make sure the push crate is a valid cell
                     continue    
@@ -43,7 +45,7 @@ class Solver:
 
                 newState = (crate, newCrates)                       #the player will be in the old position of the crate
                 cost = dist[standing] + 1                           #cost is the walk towards there + 1 for the push
-                result.append((char, newState, cost))               #char for the direction input, newState and cost self-explanitory
+                result.append((char, newState, cost))               #char for the direction input, newState and cost self-explanatory
 
         return result
 
@@ -131,7 +133,8 @@ class Solver:
 
         return ""
 
-    def heuristic(self, crates):
+    #heuristic that gets all the mindist of each crate to a goal and adds them
+    def heuristicSimple(self, crates):
         total = 0
         for crate in crates:
             d = self.minDist.get(crate)
@@ -142,6 +145,65 @@ class Solver:
             total += d
 
         return total
+
+    def heuristic(self, crates):
+        cached = self.hCache.get(crates)        #try to check if the state already has a calculated heuristic
+        if cached is not None:                  #if there is, return corresponding heuristic
+            return cached
+        cost = self.getStateHCost(crates)       #else run the method to get the heuristic
+        self.hCache[crates] = cost              #and store it to the hCache for possible future use
+        return cost 
+
+
+    #dist given, one to one mapping of crate to a goal, as a heuristic. tighter bound but still admissible since it still underestimates the real cost
+    def getStateHCost(self, crates):
+        INF = float('inf')
+        rowList = []
+
+        for crate in crates:
+            row = [table.get(crate, INF) for table in self.goalDist]    #turn the tableDist of each crate into a list
+
+            if min(row) == INF:                                         #if the minimum is inf, means no goal is reachable for crate
+                return INF
+            rowList.append(row)                                         #add to the list of rows
+        
+        #easy case; assuming that each crate has a different goal
+        total = 0                                   #total distance between all crates and goals
+        picked = set()                              #set for each picked goal
+        distinct = True                             #we assume each crate has a different goal
+        for row in rowList:
+            best = min(row)                         #get the min dist
+            j = row.index(best)                     #get the index 
+            if j in picked:                         #if the index already picked then, the crates share the same min goal
+                distinct = False
+                break                               
+            picked.add(j)                          
+            total += best
+
+        if distinct:                               #only return the total if every crate has its own goal
+            return total
+
+
+        #if crates have the same goal; we use bitmask to get the combination of row indices that gives minimum heuristic value
+        bitmask = {0:0}                                 #no goals taken yet and cost 0
+        for row in rowList:                             #get the disttable of every crate
+            newBitmask = {}                             #create a temp bitmask for each crate
+            for mask, cost in bitmask.items():          #every partial bitmask made so far
+                for j in range(len(row)):               #try every goal of this crate
+                    if row[j] == INF:                   #means the crate cant reach goal[j]
+                        continue
+                    if (mask >> j) & 1:                 #shift the mask right by j so bit j is lowest, then bitwise and with 1 to test whether goal j is taken
+                        continue                        #if both are 1, then that means goal[j] is already taken
+                    newMask = mask | (1 << j)           #means to shift 1 to the left by j and do a bitwise or to mark goal[j] as taken
+                    newCost = cost + row[j]             #add cost of the partial bitmask with the added cost of the new marked goal
+                    if newCost < newBitmask.get(newMask, INF):          #compare if the new cost is lower compared to old combination or if its new
+                        newBitmask[newMask] = newCost
+            bitmask = newBitmask                        #replace the partial bitmask with the new combinations made
+            if not bitmask:                             #means nothing valid is left
+                return INF
+        
+        return min(bitmask.values())    #return the heuristic cost of the combination that yields the least heuristic (meaning minDist but no overlap of goals)
+
 
     def isValidCell(self, cell):
         row, col = cell
@@ -176,7 +238,7 @@ class Solver:
             for d_col in (-1, 1):
                 vert = (row + d_row, col)                   #to check above/below
                 hori = (row, col + d_col)                   #to check left/right
-                diag = (row + d_row, col + d_col)           #to check diaonally
+                diag = (row + d_row, col + d_col)           #to check diagonally
 
                 #as long as any of the vert, hori, or diag is not blocked, we can skip the quadrant
                 if vert not in crates and vert not in self.walls:       
@@ -205,6 +267,7 @@ class Solver:
     def buildDistanceTable(self):
             for goal in self.goals:
                 table = self.bfsFromGoal(goal)
+                self.goalDist.append(table)             #save the distance table of each goal
                 for cell, d in table.items():
                     self.minDist[cell] = min(d, self.minDist.get(cell, float('inf')))
 
@@ -215,7 +278,7 @@ class Solver:
 
         while parent[state] is not None:                                #gets the edge trail
             previousState, moveChar = parent[state]
-            edges.append((previousState, moveChar, state))              #all the neccessary details we need to rebuild path
+            edges.append((previousState, moveChar, state))              #all the necessary details we need to rebuild path
             state = previousState
 
         edges.reverse()
@@ -224,7 +287,7 @@ class Solver:
         for previousState, moveChar, state in edges:                    
             prevPlayer, prevCrates = previousState
             newPlayer = state[0]
-            d_row, d_col = DIRS[moveChar]                               #tells us how the player got to the new postion
+            d_row, d_col = DIRS[moveChar]                               #tells us how the player got to the new position
             standing = (newPlayer[0] - d_row, newPlayer[1] - d_col)     #recalculate where the player stands before push based on moveChar
             walk = self.findPath(prevPlayer, standing, prevCrates)      #use find path to find the path from prevEdge to right before the push
             path.append(walk)                                           #append the entire walk to the path
@@ -241,7 +304,7 @@ class Solver:
                     if cell not in self.walls and cell not in self.minDist:
                         self.dead.add(cell)
 
-    #added a bfs from player postion to get all possible postion player can reach without obstruction
+    #added a bfs from player position to get all possible position player can reach without obstruction
     def movableRegion(self, player, crates):
         dist = {player: 0}                  #dict of a cell tuple corresponding to the distance
         queue = deque([player])             #bfs queue 
@@ -263,7 +326,7 @@ class Solver:
 
     #used to find the path going from one state to another
     def findPath(self, player, target, crates):
-        if target == player:                                    #return empty string when player already standing in the correct postion to push
+        if target == player:                                    #return empty string when player already standing in the correct position to push
             return ""
 
         parent = {player: None}
@@ -279,7 +342,7 @@ class Solver:
                 if newCell in crates or newCell in parent:
                     continue
 
-                parent[newCell] = (cell, char)                  #adds the previous cell postion and moved use to get there      
+                parent[newCell] = (cell, char)                  #adds the previous cell postion and move used to get there    
                 queue.append(newCell)
 
                 if newCell == target:                           #if we already reach the target, do the same logic as old rebuild path
