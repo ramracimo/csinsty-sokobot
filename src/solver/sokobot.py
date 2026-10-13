@@ -3,22 +3,18 @@ import heapq
 import sys
 from collections import deque
 
-MOVES = (('u', -1, 0),
-         ('d', 1, 0),
-         ('l', 0, -1),
-         ('r', 0, 1))
-DIRS = {char: (d_row, d_col) for char, d_row, d_col in MOVES}   #made the moves into a dict for path rebuild
-
 class Solver:
-    def __init__(self, width, height, walls, goals):
-        self.width = width
-        self.height = height
-        self.walls = walls
+    def __init__(self, W, H, floor, goals):
+        self.W = W                  
+        self.H = H
+        self.floor = floor
         self.goals = goals
+        self.moves = (('u', -W), ('d', W), ('l', -1), ('r', 1))             #put the moves in init now since offset is map depended
+        self.dirs = {char: off for char, off in self.moves}                 #dict of the moves for path rebuild
         self.dead = set()
         self.minDist = {}
         self.goalDist = []          #distance table per goal
-        self.hCache = {}            #heuristic cache, per state (to make sure same states do not get their h recalculated)
+        self.hCache = {}            #heuristic cache, per crate layout (to make sure same states do not get their h recalculated)
         self.buildDistanceTable()
         self.findDeadSquares()
 
@@ -28,13 +24,13 @@ class Solver:
         dist = self.movableRegion(player, crates)           #call the method to get the region player can move to
 
         for crate in crates:
-            for char, d_row, d_col in MOVES:
-                standing = (crate[0] - d_row, crate[1] - d_col)     #where the player has to be standing to make the push
-                pushed = (crate[0] + d_row, crate[1] + d_col)       #where the crate will be pushed to
+            for char, off in self.moves:
+                standing = crate - off                              #where the player has to be standing to make the push
+                pushed = crate + off                                #where the crate will be pushed to
                 
                 if standing not in dist:                            #make sure player can reach the position
                     continue
-                if not self.isValidCell(pushed):                    #make sure the push crate is a valid cell
+                if not self.floor[pushed]:                          #make sure the push crate is a valid cell
                     continue    
                 if pushed in crates:                                #make sure the pushed crate does not bump into another crate
                     continue
@@ -49,31 +45,17 @@ class Solver:
 
         return result
 
-    def manhattanH(self, crates):
-        total = 0
-
-        for crate in crates:
-            best = float('inf')
-            for goal in self.goals:
-                dist = abs(crate[0] - goal[0]) + abs(crate[1] - goal[1])
-                if dist < best:
-                    best = dist
-
-            total += best
-
-        return total
-
     def bfsFromGoal(self, goal):
         dist = {goal: 0}
         queue = deque([goal])
 
         while queue:
             cell = queue.popleft()
-            for _, d_row, d_col in MOVES:
-                newCell = (cell[0] - d_row, cell[1] - d_col)
-                playerCell = (cell[0] - 2 * d_row, cell[1] - 2 * d_col)
+            for _, off in self.moves:
+                newCell = cell - off
+                playerCell = newCell - off
 
-                if not (self.isValidCell(newCell) and self.isValidCell(playerCell)):
+                if not (self.floor[newCell] and self.floor[playerCell]):
                     continue
                 if newCell in dist:
                     continue
@@ -204,48 +186,22 @@ class Solver:
         
         return min(bitmask.values())    #return the heuristic cost of the combination that yields the least heuristic (meaning minDist but no overlap of goals)
 
-
-    def isValidCell(self, cell):
-        row, col = cell
-        if not (0 <= row < self.height and 0 <= col < self.width):
-            return False
-        if cell in self.walls:
-            return False
-
-        return True
-
-    def isCorner(self, cell):
-        row, col = cell
-        vertCheck = False
-        horiCheck = False
-
-        if (row - 1, col) in self.walls or (row + 1, col) in self.walls:
-            vertCheck = True
-        if (row, col - 1) in self.walls or (row, col + 1) in self.walls:
-            horiCheck = True
-
-        if vertCheck and horiCheck:
-            return True
-        else:
-            return False
-
     def isGoal(self, crates):
         return crates <= self.goals
 
     def isFrozenBlock(self, pos, crates):
-        row, col = pos
-        for d_row in (-1, 1):                               #split a 3x3 grid with pos in the middle to 4 2x2 quadrants
-            for d_col in (-1, 1):
-                vert = (row + d_row, col)                   #to check above/below
-                hori = (row, col + d_col)                   #to check left/right
-                diag = (row + d_row, col + d_col)           #to check diagonally
+        for v in (-self.W, self.W):                               #split a 3x3 grid with pos in the middle to 4 2x2 quadrants
+            for h in (-1, 1):
+                vert = pos + v                              #to check above/below
+                hori = pos + h                               #to check left/right
+                diag = pos + v + h                          #to check diagonally
 
-                #as long as any of the vert, hori, or diag is not blocked, we can skip the quadrant
-                if vert not in crates and vert not in self.walls:       
+                #as long as any of them is not blocked, skip the quadrant
+                if vert not in crates and self.floor[vert]:       
                     continue
-                if hori not in crates and hori not in self.walls:
+                if hori not in crates and self.floor[hori]:
                     continue
-                if diag not in crates and diag not in self.walls:
+                if diag not in crates and self.floor[diag]:
                     continue
 
                 if pos not in self.goals:                       #if everything is blocked and pos is not in a goal, instantly means a deadlock
@@ -287,8 +243,7 @@ class Solver:
         for previousState, moveChar, state in edges:                    
             prevPlayer, prevCrates = previousState
             newPlayer = state[0]
-            d_row, d_col = DIRS[moveChar]                               #tells us how the player got to the new position
-            standing = (newPlayer[0] - d_row, newPlayer[1] - d_col)     #recalculate where the player stands before push based on moveChar
+            standing = newPlayer - self.dirs[moveChar]                  #recalculate where the player stands before push based on moveChar
             walk = self.findPath(prevPlayer, standing, prevCrates)      #use find path to find the path from prevEdge to right before the push
             path.append(walk)                                           #append the entire walk to the path
             path.append(moveChar)                                       #then append the moveChar since thats the push that leads to the next state
@@ -297,24 +252,21 @@ class Solver:
         
 
     def findDeadSquares(self):
-        for row in range(self.height):
-                for col in range(self.width):
-                    cell = (row, col)
-
-                    if cell not in self.walls and cell not in self.minDist:
-                        self.dead.add(cell)
+        for n in range(len(self.floor)):
+            if self.floor[n] and n not in self.minDist:         #dead square if the push is impossible to reach there
+                self.dead.add(n)
 
     #added a bfs from player position to get all possible position player can reach without obstruction
     def movableRegion(self, player, crates):
-        dist = {player: 0}                  #dict of a cell tuple corresponding to the distance
+        dist = {player: 0}                  #dict of a cell index(integer) corresponding to the distance
         queue = deque([player])             #bfs queue 
 
         while queue:
             cell = queue.popleft()
-            for _, d_row, d_col in MOVES:                       #check all directions from the cell
-                newCell = (cell[0] + d_row, cell[1] + d_col)
+            for _, off in self.moves:                       #check all directions from the cell
+                newCell = cell + off
 
-                if not self.isValidCell(newCell):               #make sure its a valid cell
+                if not self.floor[newCell]:                       #make sure its a valid cell
                     continue
                 if newCell in crates or newCell in dist:        #make sure its not blocked by crates or already explored
                     continue
@@ -334,21 +286,21 @@ class Solver:
 
         while queue:                                            #same logic as movableRegion                            
             cell = queue.popleft()
-            for char, d_row, d_col in MOVES:
-                newCell = (cell[0] + d_row, cell[1] + d_col)
+            for char, off in self.moves:
+                newCell = cell + off
 
-                if not self.isValidCell(newCell):
+                if not self.floor[newCell]:
                     continue
                 if newCell in crates or newCell in parent:
                     continue
 
-                parent[newCell] = (cell, char)                  #adds the previous cell postion and move used to get there    
+                parent[newCell] = (cell, char)                  #adds the previous cell position and move used to get there    
                 queue.append(newCell)
 
                 if newCell == target:                           #if we already reach the target, do the same logic as old rebuild path
                     moves = []
                     state = target
-                    while parent[state] is not None:            #keep following the previous postion until we reach the starting position
+                    while parent[state] is not None:            #keep following the previous position until we reach the starting position
                         previousState, moveChar = parent[state]
                         moves.append(moveChar)
                         state = previousState
@@ -371,23 +323,29 @@ class SokoBot:
         #     print(ex)
         # return "lrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlr"
 
-        walls = set()
-        goals = set()
-        crates = set()
-        player = None
+        W = width + 2       #+2 for padding on left and right
+        H = height + 2      #+2 for padding on up and down
+        
+        def idx(i, j):                      #helper method to turn coords into a single integer
+            return (i + 1) * W + (j + 1)    #padding is needed so as to not confuse the "neighbors" of the cell
+
+        floor = [False] * (W * H)           #list as a 1D representation of the maze
+        goals = set()                       #set of integers for the position of the goals converted from idx
+        crates = set()                      #set of integers for the position of the crates converted from idx
+        player = None                       #player position 
 
         for i in range(height):
             for j in range(width):
-                if mapData[i][j] == '#':
-                    walls.add((i, j))
-                elif mapData[i][j] == '.':
-                    goals.add((i, j))
+                if mapData[i][j] != '#':
+                    floor[idx(i,j)] = True      #if the converted position is not a wall, then that floor index is accessible
+                if mapData[i][j] == '.':
+                    goals.add(idx(i,j))
                 if itemsData[i][j] == '$':
-                    crates.add((i, j))
+                    crates.add(idx(i,j))
                 elif itemsData[i][j] == '@':
-                    player = ((i, j))
+                    player = (idx(i,j))
 
-        solver = Solver(width, height, walls, goals)
+        solver = Solver(W, H, floor, goals)
         startState = (player, frozenset(crates))
 
         return solver.aStar(startState)
